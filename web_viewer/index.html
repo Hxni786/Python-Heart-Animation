@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>A Thousand Little Hearts ✨</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body, html {
+      width: 100%; height: 100%;
+      background: #000000;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      cursor: none;
+      font-family: Georgia, 'Times New Roman', serif;
+    }
+    #canvas {
+      width: 100vw;
+      height: 56.25vw; /* 16:9 aspect ratio */
+      max-height: 100vh;
+      max-width: 177.78vh; /* 16:9 aspect ratio */
+      background: #000000;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas" width="1920" height="1080"></canvas>
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    const W = 1920, H = 1080;
+    const CX = 960, CY = 445;
+    const SCALE = 22.0;
+
+    // Build arc length parameterized heart curve
+    const RESOLUTION = 3000;
+    const rawX = new Float32Array(RESOLUTION);
+    const rawY = new Float32Array(RESOLUTION);
+    const uTable = new Float32Array(RESOLUTION);
+
+    let totalLen = 0;
+    for (let i = 0; i < RESOLUTION; i++) {
+      const t = (i / (RESOLUTION - 1)) * 2 * Math.PI;
+      rawX[i] = -16.0 * Math.pow(Math.sin(t), 3);
+      rawY[i] = -(13.0 * Math.cos(t) - 5.0 * Math.cos(2*t) - 2.0 * Math.cos(3*t) - Math.cos(4*t));
+      if (i > 0) {
+        const dx = rawX[i] - rawX[i-1];
+        const dy = rawY[i] - rawY[i-1];
+        totalLen += Math.hypot(dx, dy);
+      }
+      uTable[i] = totalLen;
+    }
+    for (let i = 0; i < RESOLUTION; i++) {
+      uTable[i] /= totalLen;
+    }
+
+    function getHeartPoint(u) {
+      u = Math.max(0, Math.min(1, u));
+      let low = 0, high = RESOLUTION - 1;
+      while (low <= high) {
+        const mid = (low + high) >> 1;
+        if (uTable[mid] < u) low = mid + 1;
+        else high = mid - 1;
+      }
+      const idx = Math.min(RESOLUTION - 1, Math.max(0, low));
+      return { rx: rawX[idx], ry: rawY[idx] };
+    }
+
+    // Particle Palette
+    const PALETTE = [
+      '#FF2D82', // Neon pink
+      '#E11441', // Deep red
+      '#D20073', // Magenta
+      '#FFA0BE', // Soft rose
+      '#FFF0F8'  // White pink
+    ];
+
+    // Precompute radial glow discs
+    const glowCache = {};
+    const radii = [2, 4, 7, 12, 20, 34];
+    PALETTE.forEach(c => {
+      glowCache[c] = {};
+      radii.forEach(r => {
+        const off = document.createElement('canvas');
+        off.width = r * 2; off.height = r * 2;
+        const octx = off.getContext('2d');
+        const grad = octx.createRadialGradient(r, r, 0, r, r, r);
+        grad.addColorStop(0, '#FFFFFF');
+        grad.addColorStop(0.3, c);
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        octx.fillStyle = grad;
+        octx.beginPath(); octx.arc(r, r, r, 0, Math.PI*2); octx.fill();
+        glowCache[c][r] = off;
+      });
+    });
+
+    // Generate Perimeter Particles
+    const PARTICLE_COUNT = 1400;
+    const particles = [];
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      const u = (i / PARTICLE_COUNT);
+      const pt = getHeartPoint(u);
+      const layer = Math.random();
+      let scaleMult = 1.0;
+      let rad = 4;
+      if (layer < 0.6) {
+        scaleMult = 1.0 + (Math.random() - 0.5) * 0.015;
+        rad = [4, 4, 7, 12][Math.floor(Math.random() * 4)];
+      } else if (layer < 0.8) {
+        scaleMult = 0.965 + Math.random() * 0.02;
+        rad = [2, 4][Math.floor(Math.random() * 2)];
+      } else {
+        scaleMult = 1.025 + Math.random() * 0.025;
+        rad = [4, 7][Math.floor(Math.random() * 2)];
+      }
+
+      particles.push({
+        u: u,
+        drawTime: 1.0 + u * 3.5,
+        isActive: false,
+        relX: pt.rx * SCALE * scaleMult,
+        relY: pt.ry * SCALE * scaleMult,
+        x: CX + pt.rx * SCALE * scaleMult,
+        y: CY + pt.ry * SCALE * scaleMult,
+        vx: 0, vy: 0,
+        color: PALETTE[Math.floor(Math.random() * PALETTE.length)],
+        radius: rad,
+        twinkleSpeed: 2.5 + Math.random() * 3.5,
+        twinklePhase: Math.random() * Math.PI * 2,
+        microFreq: 1.5 + Math.random() * 2.0,
+        microPhase: Math.random() * Math.PI * 2,
+        microAmp: 0.4 + Math.random() * 0.8
+      });
+    }
+
+    // Ambient Stars
+    const stars = [];
+    for (let i = 0; i < 160; i++) {
+      stars.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        vx: (Math.random() - 0.5) * 20,
+        vy: (Math.random() - 0.5) * 15,
+        color: PALETTE[Math.floor(Math.random() * PALETTE.length)],
+        phase: Math.random() * Math.PI * 2,
+        speed: 1.5 + Math.random() * 2.5
+      });
+    }
+
+    // Lead Spark
+    const leadSpark = {
+      x: CX, y: CY - 5 * SCALE,
+      trail: [],
+      sparks: []
+    };
+
+    let startTime = performance.now();
+
+    function reset() {
+      startTime = performance.now();
+      particles.forEach(p => {
+        p.isActive = false;
+        p.vx = 0; p.vy = 0;
+      });
+      leadSpark.trail = [];
+      leadSpark.sparks = [];
+    }
+
+    window.addEventListener('keydown', e => {
+      if (e.code === 'Space' || e.key === 'r' || e.key === 'R') {
+        reset();
+      } else if (e.key === 'f' || e.key === 'F') {
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen().catch(() => {});
+        } else {
+          document.exitFullscreen().catch(() => {});
+        }
+      }
+    });
+
+    function getHeartbeat(t) {
+      if (t < 6.5) return { scale: 1.0, glow: 1.0 };
+      const cycle = 1.15;
+      const phase = ((t - 6.5) % cycle) / cycle;
+      if (phase < 0.16) {
+        const p = Math.sin(phase / 0.16 * Math.PI);
+        return { scale: 1.0 + 0.045 * Math.pow(p, 1.8), glow: 1.0 + 0.3 * p };
+      } else if (phase >= 0.20 && phase < 0.34) {
+        const p = Math.sin((phase - 0.20) / 0.14 * Math.PI);
+        return { scale: 1.0 + 0.022 * Math.pow(p, 1.8), glow: 1.0 + 0.18 * p };
+      }
+      return { scale: 1.0, glow: 1.0 };
+    }
+
+    let lastT = 0;
+
+    function animate(now) {
+      requestAnimationFrame(animate);
+      const t = (now - startTime) / 1000.0;
+      const dt = Math.min(0.05, (now - (lastT || now)) / 1000.0);
+      lastT = now;
+
+      const { scale, glow } = getHeartbeat(t);
+
+      // Black background
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, W, H);
+
+      ctx.globalCompositeOperation = 'lighter';
+
+      // 1. Ambient Stars
+      stars.forEach(s => {
+        s.x += (s.vx + Math.sin(t * 0.8 + s.phase) * 3) * dt;
+        s.y += (s.vy + Math.cos(t * 0.7 + s.phase) * 2) * dt;
+        if (s.x < 0) s.x = W; if (s.x > W) s.x = 0;
+        if (s.y < 0) s.y = H; if (s.y > H) s.y = 0;
+
+        const twinkle = 0.5 + 0.5 * Math.sin(t * s.speed + s.phase);
+        if (twinkle > 0.2) {
+          const img = glowCache[s.color][2];
+          ctx.drawImage(img, s.x - 2, s.y - 2);
+        }
+      });
+
+      // 2. Lead Spark Update
+      if (t >= 0.3 && t <= 4.5) {
+        let u = 0;
+        if (t > 1.0) u = (t - 1.0) / 3.5;
+        const pt = getHeartPoint(u);
+        const targetX = CX + pt.rx * SCALE;
+        const targetY = CY + pt.ry * SCALE;
+
+        leadSpark.trail.push({ x: targetX, y: targetY, birth: t });
+        leadSpark.x = targetX;
+        leadSpark.y = targetY;
+
+        if (Math.random() < 0.65) {
+          const angle = Math.random() * Math.PI * 2;
+          const spd = 20 + Math.random() * 60;
+          leadSpark.sparks.push({
+            x: targetX, y: targetY,
+            vx: Math.cos(angle) * spd,
+            vy: Math.sin(angle) * spd,
+            birth: t,
+            life: 0.15 + Math.random() * 0.25,
+            color: PALETTE[Math.floor(Math.random() * PALETTE.length)]
+          });
+        }
+      }
+
+      // Filter lead trail
+      leadSpark.trail = leadSpark.trail.filter(p => t - p.birth < 0.28);
+      leadSpark.trail.forEach(p => {
+        const fade = 1.0 - (t - p.birth) / 0.28;
+        if (fade > 0.05) {
+          const img = glowCache['#FFF0F8'][4];
+          ctx.drawImage(img, p.x - 4, p.y - 4);
+        }
+      });
+
+      // Filter micro sparks
+      leadSpark.sparks = leadSpark.sparks.filter(s => t - s.birth < s.life);
+      leadSpark.sparks.forEach(s => {
+        s.x += s.vx * dt; s.y += s.vy * dt;
+        const img = glowCache[s.color][2];
+        ctx.drawImage(img, s.x - 2, s.y - 2);
+      });
+
+      // Render lead spark head
+      if (t >= 0.3 && t <= 4.5) {
+        const headImg = glowCache['#FF2D82'][20];
+        ctx.drawImage(headImg, leadSpark.x - 20, leadSpark.y - 20);
+        const coreImg = glowCache['#FFF0F8'][7];
+        ctx.drawImage(coreImg, leadSpark.x - 7, leadSpark.y - 7);
+      }
+
+      // 3. Perimeter Particles
+      particles.forEach(p => {
+        if (!p.isActive) {
+          if (t >= p.drawTime) {
+            p.isActive = true;
+            const a = Math.random() * Math.PI * 2;
+            const dist = 3 + Math.random() * 14;
+            p.x = leadSpark.x + Math.cos(a) * dist;
+            p.y = leadSpark.y + Math.sin(a) * dist;
+            p.vx = Math.cos(a) * (30 + Math.random() * 60);
+            p.vy = Math.sin(a) * (30 + Math.random() * 60);
+          } else {
+            return;
+          }
+        }
+
+        // Target with heartbeat
+        const targetX = CX + p.relX * scale + Math.sin(t * p.microFreq + p.microPhase) * p.microAmp;
+        const targetY = CY + p.relY * scale + Math.cos(t * p.microFreq + p.microPhase) * p.microAmp;
+
+        const dx = targetX - p.x;
+        const dy = targetY - p.y;
+        const k = 55.0, c = 10.0;
+        p.vx += (k * dx - c * p.vx) * dt;
+        p.vy += (k * dy - c * p.vy) * dt;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+
+        const img = glowCache[p.color][p.radius];
+        ctx.drawImage(img, p.x - p.radius, p.y - p.radius);
+      });
+
+      // 4. Romantic Message (8.0s - 10.0s fade-in)
+      if (t >= 8.0) {
+        const rawU = Math.min(1.0, (t - 8.0) / 1.6);
+        const smoothU = rawU * rawU * (3.0 - 2.0 * rawU);
+
+        ctx.font = '36px Georgia, serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        const msg = '“Every little thing reminds me of you.”';
+        const ty = 925;
+
+        // Glow
+        ctx.fillStyle = `rgba(220, 60, 120, ${smoothU * 0.7})`;
+        for (let ox = -2; ox <= 2; ox++) {
+          for (let oy = -2; oy <= 2; oy++) {
+            ctx.fillText(msg, CX + ox, ty + oy);
+          }
+        }
+
+        // Crisp text
+        ctx.fillStyle = `rgba(255, 246, 250, ${smoothU})`;
+        ctx.fillText(msg, CX, ty);
+      }
+    }
+
+    requestAnimationFrame(animate);
+  </script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+# Core dependencies for A Thousand Little Hearts
+# Note: pygame-ce (Community Edition) is recommended for Python 3.10-3.14+,
+# but standard pygame (>=2.5.0) is also fully supported.
+pygame-ce>=2.5.0
+numpy>=1.24.0
